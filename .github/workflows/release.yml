@@ -1,0 +1,76 @@
+name: Build and Release Voxy
+
+run-name: Release ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Gradle Cache
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Grant Execute Permission
+        run: chmod +x gradlew
+
+      # 自动读取 Minecraft 版本
+      - name: Read Minecraft Version
+        id: mc_version
+        run: |
+          MC_VERSION=$(grep "^minecraft_version=" gradle.properties | cut -d'=' -f2)
+
+          echo "MC_VERSION=$MC_VERSION" >> $GITHUB_ENV
+
+          echo "Detected Minecraft Version: $MC_VERSION"
+
+      - name: Build Mod
+        run: ./gradlew build -x test --parallel --no-daemon
+
+      # 自动重命名 jar
+      - name: Prepare Release Files
+        run: |
+          mkdir release
+
+          VERSION=${GITHUB_REF_NAME}
+
+          for file in build/libs/*.jar; do
+            filename=$(basename "$file")
+
+            # 跳过 sources/dev jar
+            if [[ "$filename" == *sources* ]] || [[ "$filename" == *dev* ]]; then
+              continue
+            fi
+
+            base="${filename%.jar}"
+
+            newname="${base}-mc${MC_VERSION}-${VERSION}.jar"
+
+            cp "$file" "release/$newname"
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.jar
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
